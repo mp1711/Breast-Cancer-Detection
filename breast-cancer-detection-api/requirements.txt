@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+tensorflow
+keras
+numpy
+matplotlib
+scikit-learn
+lime
+pydantic
+python-multipart
+bcrypt
+sqlalchemy
+alembic
+python-dotenv
+pytest
+httpx
+starlette
