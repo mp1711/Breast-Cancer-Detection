@@ -27,6 +27,6 @@ A web application for automated detection of breast cancer lesions using deep le
 ### Backend
 
 ```bash
-cd backend
+cd breast-cancer-detection-api
 pip install -r [requirements.txt](http://_vscodecontentref_/0)
 uvicorn app.main:app --reload
