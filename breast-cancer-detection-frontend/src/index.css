@@ -1049,3 +1049,27 @@ label {
   background-color: var(--primary);
   border-radius: 20px;
 }
+
+button[type="submit"] {
+  background: linear-gradient(90deg, #007BFF, #28A745);
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 25px;
+  cursor: pointer;
+  transition: all 0.3s ease-in-out;
+  outline: none;
+}
+
+button[type="submit"]:hover {
+  background: linear-gradient(90deg, #0056b3, #1e7e34);
+  transform: scale(1.05);
+}
+
+button[type="submit"]:disabled {
+  background: linear-gradient(90deg, #a0c4ff, #a3e6a3);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
