@@ -100,7 +100,7 @@ alembic revision --autogenerate -m "initial_setup"
 alembic upgrade head
 pip install -r requirements.txt
 
-python create_admin.py admin@example.com admin secure_password
+python3 create_admin.py admin@example.com admin secure_password
 
 uvicorn app.main:app --reload
 ```
