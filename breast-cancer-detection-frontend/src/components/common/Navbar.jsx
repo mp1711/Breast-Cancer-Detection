@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import { logout } from "../../api/auth";
@@ -8,15 +8,25 @@ const Navbar = () => {
   const isAuthenticated = !!localStorage.getItem("access_token");
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const dropdownRef = useRef(null); // Reference for dropdown
 
   const handleLogout = () => {
     logout();
     navigate("/auth/login");
   };
 
-  const toggleAdminMenu = () => {
-    setShowAdminMenu(!showAdminMenu);
-  };
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowAdminMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   return (
     <nav className="navbar">
@@ -30,10 +40,10 @@ const Navbar = () => {
             <Link to="/predict">Predict</Link>
 
             {user.is_admin && (
-              <div className="admin-dropdown">
+              <div className="admin-dropdown" ref={dropdownRef}>
                 <button
                   className="admin-dropdown-button"
-                  onClick={toggleAdminMenu}
+                  onClick={() => setShowAdminMenu((prev) => !prev)}
                 >
                   Admin ▼
                 </button>
@@ -45,6 +55,7 @@ const Navbar = () => {
                 )}
               </div>
             )}
+
             <button onClick={handleLogout} className="nav-link-button">
               Logout
             </button>
