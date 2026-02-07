@@ -13,6 +13,7 @@ from sklearn.metrics import classification_report, confusion_matrix, precision_r
 from sqlalchemy.orm import Session
 from app.db import crud
 from app.schemas.model import ModelCreate
+from app.ml.model_evaluator import ModelEvaluator
 import os
 import shutil
 
@@ -275,7 +276,7 @@ class ModelTrainer:
         history = model.fit(
             X_train, y_train,
             validation_data=(X_val, y_val),
-            epochs=30,
+            epochs=3,
             batch_size=32,
             callbacks=[checkpoint, early_stop, scheduler],
             verbose=1
@@ -284,86 +285,10 @@ class ModelTrainer:
         return history
 
     def evaluate_model(self, model, X_test, y_test, model_name, history):
-        """Evaluate the model and generate plots"""
-        test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
-        print(f"{model_name} - Test accuracy: {test_acc:.4f}, Test loss: {test_loss:.4f}")
-
-        y_pred = model.predict(X_test).ravel()
-        fpr, tpr, _ = roc_curve(y_test, y_pred)
-        precision, recall, _ = precision_recall_curve(y_test, y_pred)
-        auc_score = roc_auc_score(y_test, y_pred)
-
-        # Create model-specific results directory using the standard structure
-        model_results_dir = os.path.join(self.results_dir, model_name)
-        os.makedirs(model_results_dir, exist_ok=True)
-
-        # Save all plots in the model-specific directory
-        # ROC Curve
-        plt.figure(figsize=(10, 8))
-        plt.plot(fpr, tpr, label=f'ROC Curve (AUC = {auc_score:.3f})')
-        plt.plot([0, 1], [0, 1], linestyle='--', label='Random Classifier')
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title(f'ROC Curve - {model_name} (AUC = {auc_score:.3f})')
-        plt.legend()
-        plt.savefig(os.path.join(model_results_dir, 'roc_curve.png'))
-        plt.close()
-
-        # Precision-Recall Curve
-        plt.figure(figsize=(10, 8))
-        plt.plot(recall, precision, label='Precision-Recall Curve')
-        plt.xlabel('Recall')
-        plt.ylabel('Precision')
-        plt.title(f'Precision-Recall Curve - {model_name}')
-        plt.legend()
-        plt.savefig(os.path.join(model_results_dir, 'precision_recall.png'))
-        plt.close()
-
-        # Training vs Validation Accuracy
-        plt.figure(figsize=(10, 8))
-        plt.plot(history.history['accuracy'], label='Training Accuracy')
-        plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
-        plt.xlabel('Epoch')
-        plt.ylabel('Accuracy')
-        plt.title(f'Training vs Validation Accuracy - {model_name}')
-        plt.legend()
-        plt.savefig(os.path.join(model_results_dir, 'training_history.png'))
-        plt.close()
-
-        # Confusion matrix
-        y_pred_binary = (y_pred > 0.5).astype(int)
-        cm = confusion_matrix(y_test, y_pred_binary)
-
-        plt.figure(figsize=(8, 6))
-        plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-        plt.title(f'Confusion Matrix - {model_name}')
-        plt.colorbar()
-        tick_marks = [0, 1]
-        plt.xticks(tick_marks, ['Benign', 'Malignant'], rotation=45)
-        plt.yticks(tick_marks, ['Benign', 'Malignant'])
-
-        fmt = 'd'
-        thresh = cm.max() / 2.
-        for i in range(cm.shape[0]):
-            for j in range(cm.shape[1]):
-                plt.text(j, i, format(cm[i, j], fmt),
-                        horizontalalignment="center",
-                        color="white" if cm[i, j] > thresh else "black")
-
-        plt.ylabel('True label')
-        plt.xlabel('Predicted label')
-        plt.tight_layout()
-        plt.savefig(os.path.join(model_results_dir, 'confusion_matrix.png'))
-        plt.close()
-
-        report = classification_report(
-            y_test, y_pred_binary, output_dict=True, zero_division=0)
-
-        return {
-            'accuracy': test_acc,
-            'loss': test_loss,
-            'auc': auc_score,
-            'precision': report['1']['precision'] if '1' in report else 0,
-            'recall': report['1']['recall'] if '1' in report else 0,
-            'f1': report['1']['f1-score'] if '1' in report else 0,
-        }
+        """Evaluate the model and generate plots using ModelEvaluator"""
+        evaluator = ModelEvaluator(self.dataset_id, self.db_session)
+        return evaluator.evaluate_model(
+            model, X_test, y_test, model_name,
+            include_training_history=True,
+            history=history
+        )

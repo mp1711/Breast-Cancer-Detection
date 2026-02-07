@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Alembic (ignore everything)
+breast-cancer-detection-api/alembic/
+breast-cancer-detection-api/alembic.ini
+
+# ML Models and Generated Data
+breast-cancer-detection-api/models/
+breast-cancer-detection-api/results/
+breast-cancer-detection-api/data/
+breast-cancer-detection-api/uploads/
+breast-cancer-detection-api/predictions/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node.js / React
+node_modules/
+/dist
+/build
+.cache/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
