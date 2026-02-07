@@ -3,11 +3,12 @@ from fastapi.responses import JSONResponse
 from fastapi import HTTPException
 import os
 import numpy as np
+import tensorflow as tf
 from keras.models import load_model
 from keras.preprocessing import image
-from lime import lime_image
-from skimage.segmentation import mark_boundaries
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import cv2
 from app.core.settings import settings
 from app.db import crud
 import traceback
@@ -99,8 +100,8 @@ class Predictor:
             explanation_path = None
             
             if result=="Malignant" :
-                # Generate explanation for malignant predictions
-                explanation_path = self.generate_lime_explanation(img_path)
+                # Generate explanation for malignant predictions using Grad-CAM
+                explanation_path = self.generate_gradcam_explanation(img_path)
                 
             return {
                 "result": result,
@@ -116,46 +117,89 @@ class Predictor:
                 "error": str(e)
             }
     
-    def generate_lime_explanation(self, img_path, target_size=(224, 224)):
+    def generate_gradcam_explanation(self, img_path, target_size=(224, 224)):
+        """
+        Generate Grad-CAM heatmap explanation for the prediction.
+        Shows which regions of the image were most important for the prediction.
+        """
         try:
             model = self.load_model()
+
+            # Load and preprocess image
             img = image.load_img(img_path, target_size=target_size)
-            img_array = image.img_to_array(img) / 255.0
-            
-            # Define prediction function that LIME can use (expects batch input)
-            def predict_fn(images):
-                # Normalize if needed
-                return model.predict(images)
-            
-            explainer = lime_image.LimeImageExplainer()
-            explanation = explainer.explain_instance(
-                img_array,
-                predict_fn,
-                top_labels=1,
-                hide_color=0,
-                num_samples=50
+            img_array = image.img_to_array(img)
+            img_array = np.expand_dims(img_array, axis=0) / 255.0
+
+            # Find the last convolutional layer
+            last_conv_layer = None
+            for layer in reversed(model.layers):
+                if 'conv' in layer.name.lower():
+                    last_conv_layer = layer
+                    break
+
+            if last_conv_layer is None:
+                print("No convolutional layer found in model, cannot generate Grad-CAM")
+                return None
+
+            # Create a model that maps the input image to the activations of the last conv layer
+            # as well as the output predictions
+            grad_model = tf.keras.models.Model(
+                [model.inputs],
+                [last_conv_layer.output, model.output]
             )
-            
-            temp, mask = explanation.get_image_and_mask(
-                explanation.top_labels[0], 
-                positive_only=True, 
-                num_features=5, 
-                hide_rest=False
-            )
-            
+
+            # Compute the gradient of the output with respect to the last conv layer
+            with tf.GradientTape() as tape:
+                conv_outputs, predictions = grad_model(img_array)
+                # Get the prediction for malignant class
+                loss = predictions[:, 0]
+
+            # Extract the gradients
+            grads = tape.gradient(loss, conv_outputs)
+
+            # Pool the gradients over all the axes leaving out the channel dimension
+            pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+
+            # Weight the channels by the gradients
+            conv_outputs = conv_outputs[0]
+            pooled_grads = pooled_grads.numpy()
+            conv_outputs = conv_outputs.numpy()
+
+            for i in range(pooled_grads.shape[-1]):
+                conv_outputs[:, :, i] *= pooled_grads[i]
+
+            # Average over all the channels to get the heatmap
+            heatmap = np.mean(conv_outputs, axis=-1)
+
+            # Normalize the heatmap
+            heatmap = np.maximum(heatmap, 0)  # ReLU
+            if np.max(heatmap) != 0:
+                heatmap = heatmap / np.max(heatmap)
+
+            # Resize heatmap to match original image size
+            heatmap = cv2.resize(heatmap, target_size)
+
+            # Load original image for overlay
+            img_original = cv2.imread(img_path)
+            img_original = cv2.resize(img_original, target_size)
+
+            # Convert heatmap to RGB
+            heatmap = np.uint8(255 * heatmap)
+            heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+
+            # Superimpose the heatmap on original image
+            superimposed_img = cv2.addWeighted(img_original, 0.6, heatmap, 0.4, 0)
+
+            # Save the result
             os.makedirs(PREDICTION_FOLDER, exist_ok=True)
             file_name = os.path.basename(img_path).split('.')[0]
-            output_path = os.path.join(PREDICTION_FOLDER, f"{file_name}_lime.png")
-            
-            plt.figure(figsize=(8, 8))
-            plt.imshow(mark_boundaries(temp, mask))
-            plt.axis('off')
-            plt.tight_layout()
-            plt.savefig(output_path)
-            plt.close()
-            
+            output_path = os.path.join(PREDICTION_FOLDER, f"{file_name}_gradcam.png")
+
+            cv2.imwrite(output_path, superimposed_img)
+
             return output_path
+
         except Exception as e:
             traceback.print_exc()
-            print(f"Error generating LIME explanation: {e}")
+            print(f"Error generating Grad-CAM explanation: {e}")
             return None

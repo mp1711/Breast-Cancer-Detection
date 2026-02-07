@@ -5,7 +5,7 @@ keras
 numpy
 matplotlib
 scikit-learn
-lime
+opencv-python
 pydantic
 python-multipart
 bcrypt
