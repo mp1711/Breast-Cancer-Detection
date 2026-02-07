@@ -812,6 +812,8 @@ label {
 
 .training-controls {
   flex: 0 0 auto;
+  display: flex;
+  gap: 16px;
 }
 
 .best-model-selector {

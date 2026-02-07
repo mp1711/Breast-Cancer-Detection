@@ -209,25 +209,26 @@ const PredictPage = () => {
 
               {predictionResult.result.explanation && (
                 <div className="explanation">
-                  <h3>LIME Explanation</h3>
-                  <a 
-                    href={getExplanationImage(predictionResult.result.explanation)} 
-                    target="_blank" 
+                  <h3>Grad-CAM Heatmap</h3>
+                  <a
+                    href={getExplanationImage(predictionResult.result.explanation)}
+                    target="_blank"
                     rel="noreferrer"
                     className="explanation-link"
                   >
                     <img
                       src={getExplanationImage(predictionResult.result.explanation)}
-                      alt="LIME Explanation"
-                      className="lime-image"
+                      alt="Grad-CAM Heatmap"
+                      className="gradcam-image"
                     />
                     <div className="explanation-overlay">
                       <span>View Full Size</span>
                     </div>
                   </a>
                   <p className="explanation-note">
-                    The highlighted areas show regions that influenced the
-                    prediction. Click on the image to view in full size.
+                    The heatmap shows regions that were most important for the
+                    malignant prediction. Red/yellow areas indicate high importance.
+                    Click on the image to view in full size.
                   </p>
                 </div>
               )}
