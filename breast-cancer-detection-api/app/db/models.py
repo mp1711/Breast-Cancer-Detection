@@ -32,6 +32,7 @@ class Model(Base):
     auc = Column(Float, nullable=True)
     model_path = Column(String, nullable=True)
     dataset_id = Column(Integer, nullable=True)
+    is_uploaded = Column(Boolean, default=False, nullable=False)
 
 class Prediction(Base):
     __tablename__ = 'predictions'

@@ -1,14 +1,17 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from sqlalchemy.orm import Session
 from app.db import crud
 from app.db.session import get_db
 import os
 import shutil
+import tensorflow as tf
 from app.core.security import get_current_admin_user
 from app.schemas import user as user_schemas
 from app.schemas import model as model_schemas
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi.responses import FileResponse
+from app.ml.model_validator import ModelValidator
+from app.ml.model_evaluator import ModelEvaluator
 
 router = APIRouter()
 
@@ -361,3 +364,257 @@ async def set_dataset_best_model(
             status_code=500,
             detail=f"Error setting best model: {str(e)}"
         )
+
+
+@router.post("/datasets/{dataset_id}/upload")
+async def upload_models(
+    dataset_id: int,
+    cnn_file: Optional[UploadFile] = File(None),
+    vgg16_file: Optional[UploadFile] = File(None),
+    vgg19_file: Optional[UploadFile] = File(None),
+    resnet_file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    current_admin: user_schemas.User = Depends(get_current_admin_user)
+):
+    """
+    Admin endpoint to upload pre-trained models for a dataset.
+    Processes each model sequentially: validate, test, save.
+    """
+    # Validate dataset exists
+    dataset = crud.get_dataset(db, dataset_id=dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    # Map uploaded files to model types
+    uploaded_models = {}
+    if cnn_file:
+        uploaded_models['CNN'] = cnn_file
+    if vgg16_file:
+        uploaded_models['VGG16'] = vgg16_file
+    if vgg19_file:
+        uploaded_models['VGG19'] = vgg19_file
+    if resnet_file:
+        uploaded_models['ResNet'] = resnet_file
+
+    if not uploaded_models:
+        raise HTTPException(status_code=400, detail="No model files provided")
+
+    results = []
+    evaluator = ModelEvaluator(dataset_id, db)
+
+    # Load test data once for all models
+    try:
+        X_test, y_test = evaluator.load_test_data(dataset.dataset_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load test data: {str(e)}"
+        )
+
+    # Process each uploaded model
+    for model_type, file in uploaded_models.items():
+        temp_path = None
+        keras_path = None
+        try:
+            # Save uploaded file temporarily
+            temp_path = f"/tmp/{file.filename}"
+            with open(temp_path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+
+            # Validate and convert to .keras
+            validator = ModelValidator()
+            success, error, keras_path = validator.validate_all(
+                temp_path, model_type, dataset.dataset_path
+            )
+
+            if not success:
+                results.append({
+                    "model_type": model_type,
+                    "success": False,
+                    "error": error
+                })
+                if temp_path and os.path.exists(temp_path):
+                    os.remove(temp_path)
+                if keras_path and os.path.exists(keras_path):
+                    os.remove(keras_path)
+                continue
+
+            # Load and evaluate model on test set
+            try:
+                model = tf.keras.models.load_model(keras_path, compile=False)
+            except Exception as e:
+                results.append({
+                    "model_type": model_type,
+                    "success": False,
+                    "error": f"Failed to load model file. It may be corrupted or incompatible: {str(e)}"
+                })
+                if temp_path and os.path.exists(temp_path):
+                    os.remove(temp_path)
+                if keras_path and os.path.exists(keras_path):
+                    os.remove(keras_path)
+                continue
+
+            metrics = evaluator.evaluate_model(
+                model, X_test, y_test, model_type,
+                include_training_history=False
+            )
+
+            # Move model to final location
+            final_path = os.path.join("models", str(dataset_id), f"{model_type}.keras")
+            os.makedirs(os.path.dirname(final_path), exist_ok=True)
+
+            # Delete old model file if exists
+            if os.path.exists(final_path):
+                os.remove(final_path)
+
+            # Delete old training history plot if exists (uploaded models don't have training history)
+            old_training_history = os.path.join("results", str(dataset_id), model_type, "training_history.png")
+            if os.path.exists(old_training_history):
+                os.remove(old_training_history)
+                print(f"Removed old training history plot for {model_type}")
+
+            shutil.move(keras_path, final_path)
+
+            # Update or create database record
+            existing_model = db.query(crud.models.Model).filter(
+                crud.models.Model.name == model_type,
+                crud.models.Model.dataset_id == dataset_id
+            ).first()
+
+            if existing_model:
+                existing_model.accuracy = metrics['accuracy']
+                existing_model.loss = metrics['loss']
+                existing_model.auc = metrics['auc']
+                existing_model.model_path = final_path
+                existing_model.is_uploaded = True
+            else:
+                new_model = crud.models.Model(
+                    name=model_type,
+                    accuracy=metrics['accuracy'],
+                    loss=metrics['loss'],
+                    auc=metrics['auc'],
+                    model_path=final_path,
+                    dataset_id=dataset_id,
+                    is_uploaded=True
+                )
+                db.add(new_model)
+
+            db.commit()
+
+            results.append({
+                "model_type": model_type,
+                "success": True,
+                "metrics": metrics
+            })
+
+            # Clean up temp file
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
+        except Exception as e:
+            results.append({
+                "model_type": model_type,
+                "success": False,
+                "error": str(e)
+            })
+            # Clean up on error
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+            if keras_path and keras_path != temp_path and os.path.exists(keras_path):
+                os.remove(keras_path)
+            db.rollback()
+
+    return {
+        "success": True,
+        "message": f"Processed {len(uploaded_models)} model(s)",
+        "results": results
+    }
+
+
+@router.post("/datasets/{dataset_id}/retest")
+async def retest_models(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    current_admin: user_schemas.User = Depends(get_current_admin_user)
+):
+    """
+    Admin endpoint to re-evaluate all models for a dataset.
+    Regenerates plots and updates metrics in database.
+    """
+    # Get dataset
+    dataset = crud.get_dataset(db, dataset_id=dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    # Get all models for dataset
+    models = db.query(crud.models.Model).filter(
+        crud.models.Model.dataset_id == dataset_id
+    ).all()
+
+    if not models:
+        raise HTTPException(status_code=404, detail="No models found for dataset")
+
+    # Load test data once
+    evaluator = ModelEvaluator(dataset_id, db)
+    try:
+        X_test, y_test = evaluator.load_test_data(dataset.dataset_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load test data: {str(e)}"
+        )
+
+    # Evaluate each model
+    results = []
+    for model_record in models:
+        try:
+            if not os.path.exists(model_record.model_path):
+                results.append({
+                    "name": model_record.name,
+                    "success": False,
+                    "error": "Model file not found"
+                })
+                continue
+
+            # Load and evaluate
+            try:
+                model = tf.keras.models.load_model(model_record.model_path, compile=False)
+            except Exception as load_error:
+                results.append({
+                    "name": model_record.name,
+                    "success": False,
+                    "error": f"Failed to load model: {str(load_error)}"
+                })
+                continue
+
+            metrics = evaluator.evaluate_model(
+                model, X_test, y_test, model_record.name,
+                include_training_history=False
+            )
+
+            # Update database
+            model_record.accuracy = metrics['accuracy']
+            model_record.loss = metrics['loss']
+            model_record.auc = metrics['auc']
+
+            results.append({
+                "name": model_record.name,
+                "success": True,
+                "metrics": metrics
+            })
+
+        except Exception as e:
+            results.append({
+                "name": model_record.name,
+                "success": False,
+                "error": str(e)
+            })
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Models retested successfully",
+        "results": results
+    }

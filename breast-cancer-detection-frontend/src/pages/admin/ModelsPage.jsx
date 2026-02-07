@@ -4,10 +4,12 @@ import {
   setDatasetBestModel,
   trainDatasetModels,
   getDatasetBestModel,
+  retestModels,
 } from "../../api/models";
 import { fetchDatasets } from "../../api/datasets";
 import { Button, Card, Loading, Alert } from "../../components/common";
 import { getDatasetModelPlot } from "../../api/models";
+import ModelUploader from "../../components/admin/ModelUploader";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -21,6 +23,8 @@ const ModelsPage = () => {
   const [isTraining, setIsTraining] = useState(false);
   const [bestModel, setBestModel] = useState(null);
   const [selectedModelName, setSelectedModelName] = useState("none");
+  const [showUploader, setShowUploader] = useState(false);
+  const [isRetesting, setIsRetesting] = useState(false);
 
   const plotTypes = [
     "roc_curve",
@@ -144,6 +148,39 @@ const ModelsPage = () => {
     }
   };
 
+  const handleRetestModels = async () => {
+    if (!selectedDatasetId) {
+      setError("Please select a dataset first");
+      return;
+    }
+
+    if (models.length === 0) {
+      setError("No models available to retest");
+      return;
+    }
+
+    try {
+      setIsRetesting(true);
+      setError(null);
+      setSuccess(null);
+
+      await retestModels(selectedDatasetId);
+
+      setSuccess("All models retested successfully!");
+      await loadModelsForDataset(selectedDatasetId);
+    } catch (error) {
+      console.error("Error retesting models:", error);
+      setError(`Failed to retest models: ${error.message || "Unknown error"}`);
+    } finally {
+      setIsRetesting(false);
+    }
+  };
+
+  const handleUploadComplete = async (result) => {
+    setSuccess("Model upload completed!");
+    await loadModelsForDataset(selectedDatasetId);
+  };
+
   const formatPlotTypeName = (plotType) => {
     return plotType
       .split("_")
@@ -197,8 +234,29 @@ const ModelsPage = () => {
           >
             {isTraining ? "Training in progress..." : "Train Models"}
           </Button>
+          <Button
+            onClick={() => setShowUploader(!showUploader)}
+            disabled={!selectedDatasetId}
+            className="upload-toggle-btn"
+          >
+            {showUploader ? "Hide Uploader" : "Upload Models"}
+          </Button>
+          <Button
+            onClick={handleRetestModels}
+            disabled={!selectedDatasetId || isRetesting || models.length === 0}
+            className="retest-btn"
+          >
+            {isRetesting ? "Retesting..." : "Retest All Models"}
+          </Button>
         </div>
       </div>
+
+      {showUploader && selectedDatasetId && (
+        <ModelUploader
+          datasetId={selectedDatasetId}
+          onUploadComplete={handleUploadComplete}
+        />
+      )}
 
       {/* Best Model Selection */}
       {models.length > 0 && (
@@ -252,7 +310,12 @@ const ModelsPage = () => {
               <div className="best-model-visuals">
                 <h3>Model Visualizations</h3>
                 <div className="plots-grid">
-                  {plotTypes.map((plotType) => (
+                  {plotTypes.filter(plotType => {
+                    if (bestModel.is_uploaded && plotType === 'training_history') {
+                      return false;
+                    }
+                    return true;
+                  }).map((plotType) => (
                     <div key={plotType} className="plot-container">
                       <h4>{formatPlotTypeName(plotType)}</h4>
                       <a
@@ -343,7 +406,12 @@ const ModelsPage = () => {
                   <div className="model-plots">
                     <h3>Available Plots</h3>
                     <ul className="plots-list">
-                      {Object.keys(model.plots).map((plotKey) => (
+                      {Object.keys(model.plots).filter(plotKey => {
+                        if (model.is_uploaded && plotKey === 'training_history') {
+                          return false;
+                        }
+                        return true;
+                      }).map((plotKey) => (
                         <li key={plotKey}>
                           <a
                             href={`http://localhost:8000${model.plots[plotKey]}`}

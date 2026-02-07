@@ -8,6 +8,7 @@ class ModelBase(BaseModel):
     auc: Optional[float] = None
     model_path: Optional[str] = None
     dataset_id: Optional[int] = None
+    is_uploaded: bool = False
 
 class ModelCreate(ModelBase):
     pass
@@ -24,6 +25,7 @@ class Model(BaseModel):
     model_path: Optional[str] = None
     dataset_id: Optional[int] = None
     description: Optional[str] = None
+    is_uploaded: bool = False
 
     class Config:
         from_attributes = True  

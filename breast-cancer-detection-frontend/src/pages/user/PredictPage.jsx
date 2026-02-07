@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { predictWithDataset, getExplanationImage } from "../../api/predictions";
 import { fetchDatasets } from "../../api/datasets";
+import { getDatasetBestModel } from "../../api/models";
 import { Button, Card, Loading, Alert } from "../../components/common";
 
 const PredictPage = () => {
@@ -11,6 +12,8 @@ const PredictPage = () => {
   const [error, setError] = useState(null);
   const [datasets, setDatasets] = useState([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState("");
+  const [bestModel, setBestModel] = useState(null);
+  const [checkingBestModel, setCheckingBestModel] = useState(false);
 
   // Load datasets when component mounts
   useEffect(() => {
@@ -32,6 +35,29 @@ const PredictPage = () => {
 
     loadDatasets();
   }, []);
+
+  // Check for best model when dataset changes
+  useEffect(() => {
+    const checkBestModel = async () => {
+      if (!selectedDatasetId) {
+        setBestModel(null);
+        return;
+      }
+
+      setCheckingBestModel(true);
+      try {
+        const model = await getDatasetBestModel(selectedDatasetId);
+        setBestModel(model);
+      } catch (err) {
+        console.error("Failed to fetch best model:", err);
+        setBestModel(null);
+      } finally {
+        setCheckingBestModel(false);
+      }
+    };
+
+    checkBestModel();
+  }, [selectedDatasetId]);
 
   const handleFileChange = (event) => {
     setSelectedFile(event.target.files[0]);
@@ -98,6 +124,21 @@ const PredictPage = () => {
             </select>
           </div>
 
+          {selectedDatasetId && !checkingBestModel && !bestModel && (
+            <Alert
+              message="No best model has been set for this dataset. Please contact an administrator to train or upload models and set a best model before making predictions."
+              type="error"
+            />
+          )}
+
+          {selectedDatasetId && bestModel && (
+            <div className="best-model-info">
+              <p style={{ color: '#28a745', fontSize: '14px', marginTop: '8px' }}>
+                ✓ Model is available for predictions
+              </p>
+            </div>
+          )}
+
           <div className="file-input-container">
             <label htmlFor="image-upload">Select Breast Image:</label>
             <div className="file-upload-wrapper">
@@ -130,7 +171,7 @@ const PredictPage = () => {
 
           <Button
             type="submit"
-            disabled={loading || !selectedFile || !selectedDatasetId}
+            disabled={loading || !selectedFile || !selectedDatasetId || !bestModel}
             className="predict-btn"
           >
             {loading ? "Processing..." : "Predict"}
